@@ -29,6 +29,11 @@ resource "libvirt_volume" "ubuntu" {
   pool   = libvirt_pool.k8s.name
   source = var.image_path       # <-- IMAGE 50Go locale
   format = "qcow2"
+
+  # AJOUT CRITIQUE POUR FORCER LA CRÉATION DU POOL EN PREMIER
+  depends_on = [
+    libvirt_pool.k8s
+  ]
 }
 
 

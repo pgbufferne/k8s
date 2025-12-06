@@ -2,14 +2,14 @@
 
 - name: Télécharger et installer la clé GPG de Helm
   ansible.builtin.get_url:
-    url: https://baltocdn.com/helm/signing.asc
+    url: https://packages.buildkite.com/helm-linux/helm-debian/gpgkey
     dest: /etc/apt/keyrings/helm.asc
     mode: '0644'
     force: yes
 
 - name: Ajouter le dépôt stable de Helm (Baltic)
   ansible.builtin.apt_repository:
-    repo: "deb [signed-by=/etc/apt/keyrings/helm.asc] https://baltocdn.com/helm/stable/debian/ all main"
+    repo: "deb [signed-by=/etc/apt/keyrings/helm.asc] https://packages.buildkite.com/helm-linux/helm-debian/any/ any main"
     filename: helm-stable
     state: present
 
