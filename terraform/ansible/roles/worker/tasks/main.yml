@@ -1,0 +1,7 @@
+# roles/worker/tasks/main.yml
+
+- name: Rejoindre le cluster
+  # Accède à la variable 'join_cmd' stockée par le Master
+  command: "{{ hostvars['K8S_TOKEN_HOLDER']['join_cmd'] }}"
+  args:
+    creates: /etc/kubernetes/kubelet.conf

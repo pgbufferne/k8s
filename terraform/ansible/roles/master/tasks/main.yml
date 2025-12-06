@@ -1,0 +1,62 @@
+# roles/master/tasks/main.yml
+
+- name: Télécharger et installer la clé GPG de Helm
+  ansible.builtin.get_url:
+    url: https://baltocdn.com/helm/signing.asc
+    dest: /etc/apt/keyrings/helm.asc
+    mode: '0644'
+    force: yes
+
+- name: Ajouter le dépôt stable de Helm (Baltic)
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/helm.asc] https://baltocdn.com/helm/stable/debian/ all main"
+    filename: helm-stable
+    state: present
+
+- name: Installer le paquet Helm
+  ansible.builtin.apt:
+    name: helm
+    state: present
+    update_cache: yes
+
+- name: Initialiser le Cluster (kubeadm init)
+  # Utilise la variable globale pod_network_cidr
+  command: kubeadm init --pod-network-cidr={{ pod_network_cidr }}
+  args:
+    creates: /etc/kubernetes/admin.conf
+  register: kubeadm_init
+
+- name: Configurer .kube pour l'utilisateur '{{ ansible_user }}'
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: 0755
+
+- name: Copier le fichier admin.conf
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    remote_src: yes
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+
+- name: Installer Calico (CNI) via l'Opérateur
+  become_user: "{{ ansible_user }}"
+  command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.29.1/manifests/tigera-operator.yaml
+  ignore_errors: true
+
+- name: Configurer les Custom Resources Calico
+  become_user: "{{ ansible_user }}"
+  command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.29.1/manifests/custom-resources.yaml
+  ignore_errors: true
+
+- name: Créer le token de jonction
+  command: kubeadm token create --print-join-command
+  register: join_command_output
+
+- name: Stocker la commande de join dans une variable factice globale
+  ansible.builtin.add_host:
+    name: "K8S_TOKEN_HOLDER"
+    join_cmd: "{{ join_command_output.stdout }}"
