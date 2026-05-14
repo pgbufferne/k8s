@@ -11,7 +11,7 @@ users:
     shell: /bin/bash
     ssh_authorized_keys:
       - ${ssh_key}
-
+ 
 # --- 1. Installation des Paquets de Base (Natif) ---
 package_update: true
 package_upgrade: true

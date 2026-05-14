@@ -19,6 +19,15 @@
     state: present
     update_cache: yes
 
+- name: Installer les dépendances Python pour les modules K8s/Helm
+  ansible.builtin.apt:
+    name:
+      - python3-kubernetes
+      - python3-yaml
+      - python3-jsonpatch # Souvent requis pour les modifs de ressources
+    state: present
+    update_cache: yes
+
 - name: Initialiser le Cluster (kubeadm init)
   # Utilise la variable globale pod_network_cidr
   command: kubeadm init --pod-network-cidr={{ pod_network_cidr }}
@@ -42,15 +51,52 @@
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
 
-- name: Installer Calico (CNI) via l'Opérateur
-  become_user: "{{ ansible_user }}"
-  command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.29.1/manifests/tigera-operator.yaml
-  ignore_errors: true
 
-- name: Configurer les Custom Resources Calico
+
+- name: Ajouter le dépôt Helm Calico
+  become: yes
   become_user: "{{ ansible_user }}"
-  command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.29.1/manifests/custom-resources.yaml
-  ignore_errors: true
+  community.kubernetes.helm_repository:
+    name: projectcalico
+    repo_url: "https://docs.tigera.io/calico/charts"
+    force_update: yes # Force le rafraîchissement de l'index
+
+- name: Créer le namespace pour l'opérateur Tigera
+  become: yes
+  become_user: "{{ ansible_user }}"
+  kubernetes.core.k8s:
+    name: tigera-operator
+    api_version: v1
+    kind: Namespace
+    state: present
+    kubeconfig: "/home/{{ ansible_user }}/.kube/config"
+
+- name: Installer Calico via Helm
+  # On s'assure d'être l'utilisateur qui possède le kubeconfig
+  become: yes
+  become_user: "{{ ansible_user }}"
+  community.kubernetes.helm:
+    name: calico
+    chart_ref: projectcalico/tigera-operator
+    release_namespace: tigera-operator
+    # On pointe le fichier exact, au cas où le HOME ne serait pas setté
+    kubeconfig: "/home/{{ ansible_user }}/.kube/config"
+    values:
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+
+
+
+# - name: Installer Calico (CNI) via l'Opérateur
+#   become_user: "{{ ansible_user }}"
+#   command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.29.1/manifests/tigera-operator.yaml
+#   ignore_errors: true
+
+# - name: Configurer les Custom Resources Calico
+#   become_user: "{{ ansible_user }}"
+#   command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.29.1/manifests/custom-resources.yaml
+#   ignore_errors: true
 
 - name: Créer le token de jonction
   command: kubeadm token create --print-join-command
