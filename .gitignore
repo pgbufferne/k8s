@@ -1,3 +1,5 @@
 .terraform*
 terraform.tfstate*
 .vscode
+tfplan
+.terraform.lock.hcl

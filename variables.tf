@@ -1,41 +1,69 @@
-variable "user" {
-  description = "Nom d'utilisateur hôte"
-  type        = string
-  default     = "p-g"
-}
-
 variable "ssh_pub_path" {
-  description = "Clé publique SSH"
+  description = "Chemin vers la clé publique SSH injectée dans les VMs"
   type        = string
-  default     = "~/.ssh/id_rsa.pub"
+  default     = "~/.ssh/id_ed25519.pub"
 }
 
 variable "vm_names" {
-  type = list(string)
-  default = [
-    "k8s-master",
-    "k8s-worker-1",
-    "k8s-worker-2"
-  ]
+  description = "Noms des VMs du cluster"
+  type        = list(string)
+  default     = ["k8s-master", "k8s-worker-1", "k8s-worker-2"]
 }
 
-variable "memory_mb" { default = 4096 }
-variable "vcpu"      { default = 2 }
+variable "memory_mb" {
+  description = "RAM par VM en MiB (multiplié par 1024 pour libvirt qui attend des KiB)"
+  type        = number
+  default     = 4096
+}
+
+variable "vcpu" {
+  description = "Nombre de vCPUs par VM"
+  type        = number
+  default     = 2
+}
 
 variable "image_path" {
-  description = "Chemin image QCOW2 Ubuntu 24"
+  description = "Chemin local vers l'image QCOW2 Ubuntu 24.04"
+  type        = string
   default     = "/home/p-g/kvm/noble-server-cloudimg-amd64.img"
 }
 
+variable "disk_size_gb" {
+  description = "Taille du disque de chaque VM en Go"
+  type        = number
+  default     = 50
+}
+
+variable "pool_name" {
+  description = "Nom du pool de stockage libvirt"
+  type        = string
+  default     = "default"
+}
+
+variable "network_name" {
+  description = "Nom du réseau libvirt (bridge virbr0)"
+  type        = string
+  default     = "default"
+}
+
 variable "vm_ips" {
-  type = list(string)
-  default = [
-    "192.168.122.10", # master
-    "192.168.122.11", # worker
-    "192.168.122.12"  # worker
+  description = "Adresses IP statiques des VMs (ordre : master, worker-1, worker-2)"
+  type        = list(string)
+  default     = [
+    "192.168.122.10",
+    "192.168.122.11",
+    "192.168.122.12",
   ]
 }
 
-variable "gateway" { default = "192.168.122.1" }
-variable "dns"     { default = "192.168.122.1" }
+variable "gateway" {
+  description = "Passerelle réseau (virbr0)"
+  type        = string
+  default     = "192.168.122.1"
+}
 
+variable "dns" {
+  description = "Serveur DNS"
+  type        = string
+  default     = "192.168.122.1"
+}

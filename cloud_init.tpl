@@ -31,7 +31,9 @@ write_files:
       network: 
         version: 2 
         ethernets: 
-          ens3: 
+          interfaces-generiques:
+            match:
+             name: "en*" # Attrape enp1s0, ens3, etc
             dhcp4: false 
             addresses:
               - ${ip}/24 

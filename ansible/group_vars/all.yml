@@ -1,3 +1,6 @@
 # group_vars/all.yml
-k8s_version: "1.32"
+k8s_version: "1.36"
 pod_network_cidr: "192.168.0.0/16"
+calico_ver: "v3.29.1"
+helm_version: "v3.21.2"
+local_path_provisioner_ver: "0.0.37"

@@ -2,34 +2,43 @@
 # Le contenu des variables est chargé automatiquement depuis group_vars/all.yml
 
 - name: 0 - Attendre que SSH soit prêt sur toutes les VMs
-  hosts: kube_cluster # Cible tous les nœuds
+  hosts: kube_cluster
   gather_facts: false
+  tags: [ssh, always]
   tasks:
     - name: Vérification et attente de l'ouverture du port SSH (port 22)
       ansible.builtin.wait_for:
-        host: "{{ ansible_host }}" # Utilise l'adresse IP définie dans hosts.ini
+        host: "{{ ansible_host }}"
         port: 22
-        timeout: 300               # Temps maximum d'attente (5 minutes)
-        delay: 10                  # Commencer le test après 10 secondes
+        timeout: 300
+        delay: 10
         state: started
-      delegate_to: localhost       # Tâche exécutée depuis la machine locale
+      delegate_to: localhost
 
 - name: 1 - Configuration Commune (Prérequis)
   hosts: kube_cluster
   become: yes
+  tags: [common]
   roles:
     - common
-
 
 - name: 2 - Initialisation du Master
   hosts: kube_master
   become: yes
+  tags: [master]
   roles:
     - master
-
 
 - name: 3 - Jonction des Workers au Cluster
   hosts: kube_node
   become: yes
+  tags: [worker]
   roles:
     - worker
+
+- name: 4 - Post-Configuration du Cluster
+  hosts: kube_master
+  become: yes
+  tags: [post-config]
+  roles:
+    - post-config

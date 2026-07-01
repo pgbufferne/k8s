@@ -1,0 +1,58 @@
+# roles/post-config/tasks/main.yml
+# Exécuté sur le master APRÈS le join des workers.
+# Ajouter ici tout ce qui nécessite un cluster complet (tous les nœuds Ready).
+
+# ============================================================
+# 1. Attendre que tous les nœuds soient Ready
+# ============================================================
+
+- name: Attendre que tous les nœuds soient Ready
+  ansible.builtin.command: >
+    kubectl wait node --all
+    --for=condition=Ready
+    --timeout=300s
+  environment:
+    KUBECONFIG: "/home/{{ ansible_user }}/.kube/config"
+  changed_when: false
+
+# ============================================================
+# 2. StorageClass par défaut — local-path-provisioner
+#    Provisionnement dynamique de PersistentVolumes en stockage
+#    local (hostPath) sur le nœud qui schedule le pod.
+#    Chart : https://charts.containeroo.ch
+# ============================================================
+
+- name: Ajouter le dépôt Helm local-path-provisioner (containeroo)
+  kubernetes.core.helm_repository:
+    name: containeroo
+    repo_url: "https://charts.containeroo.ch"
+    force_update: true
+  environment:
+    KUBECONFIG: "/home/{{ ansible_user }}/.kube/config"
+
+- name: Installer local-path-provisioner via Helm
+  kubernetes.core.helm:
+    name: local-path-provisioner
+    chart_ref: containeroo/local-path-provisioner
+    chart_version: "{{ local_path_provisioner_ver }}"
+    release_namespace: local-path-storage
+    create_namespace: true
+    wait: true
+    wait_timeout: "300s"
+    kubeconfig: "/home/{{ ansible_user }}/.kube/config"
+    values:
+      storageClass:
+        name: local-path
+        defaultClass: true
+        reclaimPolicy: Delete
+      nodePathMap:
+        - node: DEFAULT_PATH_FOR_NON_LISTED_NODES
+          paths:
+            - /opt/local-path-provisioner
+      resources:
+        requests:
+          cpu: "50m"
+          memory: "64Mi"
+        limits:
+          cpu: "200m"
+          memory: "128Mi"

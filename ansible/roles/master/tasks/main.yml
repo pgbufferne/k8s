@@ -1,108 +1,114 @@
 # roles/master/tasks/main.yml
 
-- name: Télécharger et installer la clé GPG de Helm
+# ============================================================
+# 1. Installation de Helm
+# ============================================================
+
+- name: Télécharger le binaire Helm
   ansible.builtin.get_url:
-    url: https://packages.buildkite.com/helm-linux/helm-debian/gpgkey
-    dest: /etc/apt/keyrings/helm.asc
-    mode: '0644'
-    force: yes
+    url: "https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz"
+    dest: "/tmp/helm.tar.gz"
+    mode: "0644"
 
-- name: Ajouter le dépôt stable de Helm (Baltic)
-  ansible.builtin.apt_repository:
-    repo: "deb [signed-by=/etc/apt/keyrings/helm.asc] https://packages.buildkite.com/helm-linux/helm-debian/any/ any main"
-    filename: helm-stable
-    state: present
+- name: Extraire Helm
+  ansible.builtin.unarchive:
+    src: "/tmp/helm.tar.gz"
+    dest: "/tmp"
+    remote_src: yes
 
-- name: Installer le paquet Helm
-  ansible.builtin.apt:
-    name: helm
-    state: present
-    update_cache: yes
+- name: Copier le binaire Helm dans /usr/local/bin
+  ansible.builtin.copy:
+    src: "/tmp/linux-amd64/helm"
+    dest: "/usr/local/bin/helm"
+    mode: "0755"
+    remote_src: yes
 
-- name: Installer les dépendances Python pour les modules K8s/Helm
-  ansible.builtin.apt:
-    name:
-      - python3-kubernetes
-      - python3-yaml
-      - python3-jsonpatch # Souvent requis pour les modifs de ressources
-    state: present
-    update_cache: yes
+- name: Nettoyer les fichiers temporaires Helm
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/helm.tar.gz
+    - /tmp/linux-amd64
+
+# ============================================================
+# 2. Initialisation du cluster Kubernetes
+# ============================================================
 
 - name: Initialiser le Cluster (kubeadm init)
-  # Utilise la variable globale pod_network_cidr
-  command: kubeadm init --pod-network-cidr={{ pod_network_cidr }}
+  ansible.builtin.command: kubeadm init --pod-network-cidr={{ pod_network_cidr }}
   args:
     creates: /etc/kubernetes/admin.conf
   register: kubeadm_init
 
-- name: Configurer .kube pour l'utilisateur '{{ ansible_user }}'
+- name: Créer le répertoire .kube pour l'utilisateur '{{ ansible_user }}'
   ansible.builtin.file:
     path: "/home/{{ ansible_user }}/.kube"
     state: directory
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
-    mode: 0755
+    mode: "0755"
 
-- name: Copier le fichier admin.conf
+- name: Copier le fichier admin.conf vers .kube/config
   ansible.builtin.copy:
     src: /etc/kubernetes/admin.conf
     dest: "/home/{{ ansible_user }}/.kube/config"
     remote_src: yes
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
+    mode: "0600"
 
+# ============================================================
+# 3. Installation de Calico via Helm UNIQUEMENT
+#    (ne pas appliquer le manifest tigera-operator.yaml
+#     manuellement — Helm crée toutes les ressources
+#     avec les labels ownership requis)
+# ============================================================
 
-
-- name: Ajouter le dépôt Helm Calico
-  become: yes
-  become_user: "{{ ansible_user }}"
-  community.kubernetes.helm_repository:
-    name: projectcalico
-    repo_url: "https://docs.tigera.io/calico/charts"
-    force_update: yes # Force le rafraîchissement de l'index
-
-- name: Créer le namespace pour l'opérateur Tigera
-  become: yes
-  become_user: "{{ ansible_user }}"
-  kubernetes.core.k8s:
-    name: tigera-operator
-    api_version: v1
-    kind: Namespace
-    state: present
-    kubeconfig: "/home/{{ ansible_user }}/.kube/config"
-
-- name: Installer Calico via Helm
-  # On s'assure d'être l'utilisateur qui possède le kubeconfig
-  become: yes
-  become_user: "{{ ansible_user }}"
-  community.kubernetes.helm:
+- name: Installer Calico via Helm (Tigera Operator + CRDs inclus)
+  kubernetes.core.helm:
     name: calico
-    chart_ref: projectcalico/tigera-operator
+    chart_ref: "https://github.com/projectcalico/calico/releases/download/{{ calico_ver }}/tigera-operator-{{ calico_ver }}.tgz"
     release_namespace: tigera-operator
-    # On pointe le fichier exact, au cas où le HOME ne serait pas setté
+    create_namespace: true
+    wait: true
+    wait_timeout: "300s"
     kubeconfig: "/home/{{ ansible_user }}/.kube/config"
     values:
-      tolerations:
-        - effect: NoSchedule
-          operator: Exists
+      installation:
+        cni:
+          type: Calico
+        calicoNetwork:
+          ipPools:
+            - blockSize: 26
+              cidr: "{{ pod_network_cidr }}"
+              encapsulation: VXLANCrossSubnet
+              natOutgoing: Enabled
+              nodeSelector: all()
 
+- name: Attendre que les pods calico-node soient Running
+  ansible.builtin.command: >
+    kubectl get pods -n calico-system
+    -l app.kubernetes.io/name=calico-node
+    --field-selector=status.phase=Running
+    --no-headers
+  environment:
+    KUBECONFIG: "/home/{{ ansible_user }}/.kube/config"
+  register: calico_check
+  until: calico_check.stdout_lines | length > 0
+  retries: 30
+  delay: 10
+  changed_when: false
 
-
-# - name: Installer Calico (CNI) via l'Opérateur
-#   become_user: "{{ ansible_user }}"
-#   command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.29.1/manifests/tigera-operator.yaml
-#   ignore_errors: true
-
-# - name: Configurer les Custom Resources Calico
-#   become_user: "{{ ansible_user }}"
-#   command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.29.1/manifests/custom-resources.yaml
-#   ignore_errors: true
+# ============================================================
+# 4. Génération du token pour les workers
+# ============================================================
 
 - name: Créer le token de jonction
-  command: kubeadm token create --print-join-command
+  ansible.builtin.command: kubeadm token create --print-join-command
   register: join_command_output
 
-- name: Stocker la commande de join dans une variable factice globale
+- name: Stocker la commande de join dans une variable globale
   ansible.builtin.add_host:
     name: "K8S_TOKEN_HOLDER"
     join_cmd: "{{ join_command_output.stdout }}"
